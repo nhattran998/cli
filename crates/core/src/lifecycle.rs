@@ -154,7 +154,8 @@ struct LifecycleRuleInput {
     del_marker_expiration: Option<LifecycleDelMarkerInput>,
 }
 
-/// S3 `Filter` predicate: `Prefix`, a single `Tag`, or an `And` combination.
+/// S3 `Filter` predicate: `Prefix`, a single `Tag`, an `And` combination, or a
+/// standalone object-size bound.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct LifecycleFilterInput {
@@ -164,6 +165,14 @@ struct LifecycleFilterInput {
     tag: Option<LifecycleTagInput>,
     #[serde(default, alias = "And")]
     and: Option<LifecycleFilterAndInput>,
+    #[serde(
+        default,
+        alias = "ObjectSizeGreaterThan",
+        alias = "object_size_greater_than"
+    )]
+    object_size_greater_than: Option<i64>,
+    #[serde(default, alias = "ObjectSizeLessThan", alias = "object_size_less_than")]
+    object_size_less_than: Option<i64>,
 }
 
 /// S3 `Filter.And` combination of prefix, tags, and object-size bounds.
@@ -282,14 +291,14 @@ impl<'de> Deserialize<'de> for LifecycleRule {
             object_size_greater_than,
             filter_fields.object_size_greater_than,
             "objectSizeGreaterThan",
-            "Filter.And.ObjectSizeGreaterThan",
+            "Filter.ObjectSizeGreaterThan",
         )
         .map_err(D::Error::custom)?;
         let object_size_less_than = merge_exclusive(
             object_size_less_than,
             filter_fields.object_size_less_than,
             "objectSizeLessThan",
-            "Filter.And.ObjectSizeLessThan",
+            "Filter.ObjectSizeLessThan",
         )
         .map_err(D::Error::custom)?;
 
@@ -379,7 +388,8 @@ struct FilterFields {
     object_size_less_than: Option<i64>,
 }
 
-/// Flatten an S3 `Filter` (one of `Prefix`, `Tag`, `And`) into rc's flat fields.
+/// Flatten an S3 `Filter` (one of `Prefix`, `Tag`, `And`, or a standalone
+/// object-size bound) into rc's flat fields.
 ///
 /// An empty `Filter` object stays valid: the server documents it as "applies to
 /// every object in the bucket".
@@ -391,9 +401,14 @@ fn resolve_filter_fields(
     };
     let predicate_count = usize::from(filter.prefix.is_some())
         + usize::from(filter.tag.is_some())
-        + usize::from(filter.and.is_some());
+        + usize::from(filter.and.is_some())
+        + usize::from(filter.object_size_greater_than.is_some())
+        + usize::from(filter.object_size_less_than.is_some());
     if predicate_count > 1 {
-        return Err("S3 Filter allows exactly one of Prefix, Tag, or And".to_string());
+        return Err(
+            "S3 Filter allows exactly one of Prefix, Tag, And, ObjectSizeGreaterThan, or ObjectSizeLessThan"
+                .to_string(),
+        );
     }
     if let Some(and) = filter.and {
         let mut tags = HashMap::new();
@@ -424,6 +439,13 @@ fn resolve_filter_fields(
     if let Some(tag) = filter.tag {
         return Ok(FilterFields {
             tags: Some(HashMap::from([(tag.key, tag.value)])),
+            ..FilterFields::default()
+        });
+    }
+    if filter.object_size_greater_than.is_some() || filter.object_size_less_than.is_some() {
+        return Ok(FilterFields {
+            object_size_greater_than: filter.object_size_greater_than,
+            object_size_less_than: filter.object_size_less_than,
             ..FilterFields::default()
         });
     }

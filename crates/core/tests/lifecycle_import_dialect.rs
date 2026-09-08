@@ -85,6 +85,24 @@ fn s3_filter_and_combination_is_flattened() {
 }
 
 #[test]
+fn s3_standalone_object_size_greater_than_filter_is_accepted() {
+    let config = parse(
+        r#"{"Rules":[{"ID":"size-filter","Status":"Enabled","Filter":{"ObjectSizeGreaterThan":1024},"Expiration":{"Days":30}}]}"#,
+    );
+    assert_eq!(config.rules[0].object_size_greater_than, Some(1024));
+    assert_eq!(config.rules[0].expiration.clone().unwrap().days, Some(30));
+}
+
+#[test]
+fn s3_standalone_object_size_less_than_filter_is_accepted() {
+    let config = parse(
+        r#"{"rules":[{"id":"r","status":"Enabled","filter":{"ObjectSizeLessThan":65536},"expiration":{"days":7}}]}"#,
+    );
+    assert_eq!(config.rules[0].object_size_less_than, Some(65536));
+    assert_eq!(config.rules[0].expiration.clone().unwrap().days, Some(7));
+}
+
+#[test]
 fn nested_expired_object_delete_marker_is_accepted() {
     let config = parse(
         r#"{"rules":[{"id":"r","status":"Enabled","expiration":{"ExpiredObjectDeleteMarker":true}}]}"#,
@@ -131,7 +149,9 @@ fn filter_with_two_top_level_predicates_is_rejected() {
         r#"{"rules":[{"id":"r","status":"Enabled","filter":{"prefix":"a/","tag":{"key":"env","value":"prod"}}}]}"#,
     );
     assert!(
-        error.contains("exactly one of Prefix, Tag, or And"),
+        error.contains(
+            "exactly one of Prefix, Tag, And, ObjectSizeGreaterThan, or ObjectSizeLessThan"
+        ),
         "{error}"
     );
 }
